@@ -1,0 +1,90 @@
+{
+  "generated": "2026-10-30T04:07:47",
+  "summary": {
+    "passed": 8,
+    "total": 8,
+    "extra_passed": 1,
+    "extra_total": 1,
+    "demo_records": 5
+  },
+  "rows": [
+    {
+      "id": "T1",
+      "title": "Qualified form inquiry",
+      "pass": true,
+      "observed": "action=created; record=Lead; tier=qualified; draft=approved; edited=True",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T2",
+      "title": "Same person follows up by email",
+      "pass": true,
+      "observed": "action=updated; same record as T1=True; inquiry tasks on the Lead=2; final tier=qualified; draft=approved; edited=False",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T3",
+      "title": "Same form submission sent twice",
+      "pass": true,
+      "observed": "action=duplicate_submission; same record as T1=True; drafts for this submission=1",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T4",
+      "title": "Sales pitch by email",
+      "pass": true,
+      "observed": "action=created; tier=not_qualified; draft=none",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T5",
+      "title": "Vague price question",
+      "pass": true,
+      "observed": "action=created; tier=needs_review; draft=rejected; sent=None",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T6",
+      "title": "No email and no phone",
+      "pass": true,
+      "observed": "HTTP status=400; Slack alert=1; Salesforce record=None",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T7",
+      "title": "OpenAI returns an error",
+      "pass": true,
+      "observed": "action=created; tier=needs_review; llm_ok=False; draft=none; Slack alert=1",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T8",
+      "title": "Human review: edit + approve, approve, reject",
+      "pass": true,
+      "observed": "incomplete review refused=422; T1 reply sent to demo inbox=demo inbox; T1 reviewer=Morgan Lee (Ops); emails with the edited T1 text=1; T5 nothing sent=None; replies in demo inbox=2",
+      "problems": [],
+      "extra": false
+    },
+    {
+      "id": "T9",
+      "title": "Existing customer (a Contact) writes in",
+      "pass": true,
+      "observed": "action=updated; record=Contact; same Contact as before the run=True; Lead created for this email=False; inquiry tasks on the Contact=1; draft=rejected",
+      "problems": [],
+      "extra": true
+    }
+  ],
+  "source": {
+    "run": "live OpenAI round 1",
+    "model": "gpt-4.1-mini",
+    "generated": "2026-10-30T04:07:47",
+    "note": "Copy of output/results.json; the demo inbox address is replaced with \"demo inbox\"."
+  }
+}

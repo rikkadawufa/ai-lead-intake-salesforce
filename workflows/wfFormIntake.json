@@ -1,0 +1,335 @@
+{
+  "id": "wfFormIntake",
+  "name": "Lead intake: website form",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "wfErrorHandler"
+  },
+  "nodes": [
+    {
+      "id": "note-about",
+      "name": "About",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -60
+      ],
+      "parameters": {
+        "content": "## Form intake\n`POST /webhook/inquiry` from the website form. Bad input gets a 400 and a Slack alert; good input gets a 202 and goes to **Process inquiry**.",
+        "width": 1240,
+        "height": 140,
+        "color": 7
+      }
+    },
+    {
+      "id": "receive-form-inquiry",
+      "name": "Receive form inquiry",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "5e6c0650-d4f9-35fc-132d-873c59e92504",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "inquiry",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "normalize-form",
+      "name": "Normalize form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Turn a form webhook or an IMAP email into one inquiry shape (SPEC §3.1).\r\n\r\nfunction toE164(raw, defaultCountryCode = '1') {\r\n  if (raw == null) return null;\r\n  const text = String(raw).trim();\r\n  if (!text) return null;\r\n  const digits = text.replace(/[^\\d]/g, '');\r\n  if (text.startsWith('+')) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;\r\n  if (text.startsWith('00')) return digits.length - 2 >= 8 && digits.length - 2 <= 15 ? `+${digits.slice(2)}` : null;\r\n  if (defaultCountryCode === '1') {\r\n    if (digits.length === 10) return `+1${digits}`;\r\n    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;\r\n  }\r\n  return null;\r\n}\r\n\r\nfunction cleanText(value) {\r\n  const text = value == null ? '' : String(value).trim();\r\n  return text || null;\r\n}\r\n\r\nfunction cleanEmail(value) {\r\n  const text = cleanText(value);\r\n  return text ? text.toLowerCase() : null;\r\n}\r\n\r\nfunction headerValue(headers, name) {\r\n  if (!headers) return undefined;\r\n  const key = Object.keys(headers).find((item) => item.toLowerCase() === name.toLowerCase());\r\n  return key === undefined ? undefined : headers[key];\r\n}\r\n\r\nfunction formSubmissionId(body) {\r\n  if (cleanText(body.submission_id)) return String(body.submission_id).trim();\r\n  const crypto = require('crypto');\r\n  return crypto.createHash('sha256').update(`${cleanEmail(body.email) || ''}|${cleanText(body.message) || ''}`).digest('hex').slice(0, 16);\r\n}\r\n\r\nfunction normalizeForm(body = {}, headers = {}, { demoMode = false, now = new Date().toISOString() } = {}) {\r\n  return {\r\n    source: 'form',\r\n    source_id: `form:${formSubmissionId(body)}`,\r\n    received_at: now,\r\n    name: cleanText(body.name),\r\n    email: cleanEmail(body.email),\r\n    phone: toE164(body.phone),\r\n    company: cleanText(body.company),\r\n    subject: cleanText(body.subject) || 'Website contact form',\r\n    message: cleanText(body.message) || '',\r\n    demo_flags: { break_llm: Boolean(demoMode) && String(headerValue(headers, 'x-demo-break-llm') || '') === '1' },\r\n  };\r\n}\r\n\r\n// mailparser addresses look like { value: [{ address, name }], text }; the simple format gives a string.\r\nfunction firstAddress(field) {\r\n  if (!field) return { address: null, name: null };\r\n  if (typeof field === 'string') {\r\n    const match = field.match(/^\\s*\"?([^\"<]*?)\"?\\s*<([^>]+)>\\s*$/);\r\n    return match ? { address: match[2].trim(), name: match[1].trim() || null } : { address: field.trim(), name: null };\r\n  }\r\n  const first = Array.isArray(field.value) ? field.value[0] : null;\r\n  return first ? { address: first.address || null, name: first.name || null } : firstAddress(field.text);\r\n}\r\n\r\nfunction stripQuotedReply(text) {\r\n  const lines = String(text || '').replace(/\\r\\n/g, '\\n').split('\\n');\r\n  const kept = [];\r\n  for (const line of lines) {\r\n    if (line === '-- ' || line.trim() === '--') break;\r\n    if (/^On .+wrote:$/.test(line.trim())) break;\r\n    if (line.trim().startsWith('>')) continue;\r\n    kept.push(line);\r\n  }\r\n  return kept.join('\\n').trim();\r\n}\r\n\r\nfunction findPhone(text) {\r\n  const match = String(text || '').match(/(\\+?\\d[\\d\\s().-]{7,}\\d)/);\r\n  return match ? toE164(match[1]) : null;\r\n}\r\n\r\nfunction normalizeEmail(mail = {}, { selfAddress = '', now = new Date().toISOString() } = {}) {\r\n  const from = firstAddress(mail.from);\r\n  const replyTo = firstAddress(mail.replyTo || headerValue(mail.headers, 'reply-to'));\r\n  const self = String(selfAddress || '').toLowerCase();\r\n  if (!replyTo.address && from.address && from.address.toLowerCase() === self) return { skip: true, reason: 'self_sent' };\r\n  const sender = replyTo.address ? replyTo : from;\r\n  const message = stripQuotedReply(mail.text || mail.textPlain || '');\r\n  const messageId = cleanText(mail.messageId || headerValue(mail.headers, 'message-id'));\r\n  const crypto = require('crypto');\r\n  const fallbackId = crypto.createHash('sha256').update(`${sender.address || ''}|${mail.subject || ''}|${message}`).digest('hex').slice(0, 16);\r\n  return {\r\n    source: 'email',\r\n    source_id: `email:${messageId || fallbackId}`,\r\n    received_at: mail.date ? new Date(mail.date).toISOString() : now,\r\n    name: cleanText(sender.name || from.name),\r\n    email: cleanEmail(sender.address),\r\n    phone: findPhone(message),\r\n    company: null,\r\n    subject: cleanText(mail.subject),\r\n    message,\r\n    demo_flags: { break_llm: false },\r\n  };\r\n}\r\n\r\n// Demo safety: only reserved example domains, or phone-only inquiries from the fictional 555-0100–0199 range, may reach Salesforce.\r\nfunction isDemoAddress(email) {\r\n  return /@example\\.(com|org)$/i.test(String(email || ''));\r\n}\r\n\r\nfunction isDemoPhone(e164) {\r\n  return /^\\+1\\d{3}55501\\d{2}$/.test(String(e164 || ''));\r\n}\r\n\r\nfunction validateInquiry(inquiry, { demoOnly = false } = {}) {\r\n  if (!inquiry.email && !inquiry.phone) return { valid: false, reason: 'no_contact' };\r\n  if (inquiry.email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(inquiry.email)) return { valid: false, reason: 'bad_email' };\r\n  if (demoOnly && !(inquiry.email ? isDemoAddress(inquiry.email) : isDemoPhone(inquiry.phone))) return { valid: false, reason: 'non_demo_address' };\r\n  if (String(inquiry.message || '').trim().length < 5) return { valid: false, reason: 'empty_message' };\r\n  return { valid: true, reason: null };\r\n}\n\nconst item = $input.first().json;\nconst demoMode = $env.DEMO_MODE === '1';\nconst inquiry = normalizeForm(item.body || {}, item.headers || {}, { demoMode });\nreturn [{ json: { ...inquiry, validation: validateInquiry(inquiry, { demoOnly: demoMode }) } }];"
+      }
+    },
+    {
+      "id": "valid-inquiry",
+      "name": "Valid inquiry?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-inquiry-condition",
+              "leftValue": "={{ $json.validation.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "respond-202-accepted",
+      "name": "Respond 202 accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: true, source_id: $json.source_id }) }}",
+        "options": {
+          "responseCode": 202
+        }
+      }
+    },
+    {
+      "id": "process-inquiry",
+      "name": "Process inquiry",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        900,
+        100
+      ],
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "wfProcessInquiry",
+          "mode": "id"
+        },
+        "mode": "each",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "respond-400-rejected",
+      "name": "Respond 400 rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        320
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: false, error: 'invalid_inquiry', reason: $json.validation.reason }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "log-rejected-input",
+      "name": "Log rejected input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        320
+      ],
+      "parameters": {
+        "jsCode": "// Salesforce Tasks, Slack texts and the run log; every number here comes from code, not the AI.\n\nconst SUBJECT_LIMIT = 255;\n\nfunction oneLine(text, limit) {\n  const flat = String(text ?? '').replace(/\\s+/g, ' ').trim();\n  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction inquiryDescription(inquiry, qualification) {\n  const header = [`[${inquiry.source}] ${inquiry.received_at}`, ...(inquiry.subject ? [inquiry.subject] : [])];\n  const ai = `AI: ${qualification.tier} / ${qualification.topic} / ${qualification.urgency} — ${qualification.reason}`;\n  return [...header, '', inquiry.message, '', ai].join('\\n');\n}\n\nfunction decisionText(result, { date, sentTo }) {\n  if (result.timedOut) return { subject: 'AI reply review timed out', description: 'Reply drafted by AI; review timed out, nothing sent.' };\n  if (result.decision === 'approve') {\n    return {\n      subject: `AI reply approved by ${result.reviewer}`,\n      description: `Reply drafted by AI, edited: ${result.edited ? 'yes' : 'no'}, approved by ${result.reviewer} on ${date}, sent to ${sentTo}.\\n\\nSubject: ${result.subject}\\n\\n${result.body}`,\n    };\n  }\n  return { subject: `AI reply rejected by ${result.reviewer}`, description: `Reply drafted by AI, rejected by ${result.reviewer} on ${date}, nothing sent.` };\n}\n\n// One Task per inquiry, linked to the Lead or Contact; Inquiry_Source_ID__c is what repeat detection looks up.\nfunction inquiryTask(whoId, inquiry, qualification) {\n  // Form inquiries carry a fixed subject (\"Website contact form\"), so their Tasks show the start of the message.\n  const topic = inquiry.source === 'email' && inquiry.subject ? inquiry.subject : inquiry.message;\n  return {\n    WhoId: String(whoId),\n    Subject: oneLine(`Inquiry via ${inquiry.source}: ${topic}`, Math.min(SUBJECT_LIMIT, `Inquiry via ${inquiry.source}: `.length + 60)),\n    Description: inquiryDescription(inquiry, qualification),\n    Status: 'Completed',\n    Priority: 'Normal',\n    ActivityDate: String(inquiry.received_at || new Date().toISOString()).slice(0, 10),\n    Inquiry_Source_ID__c: inquiry.source_id,\n  };\n}\n\nfunction decisionTask(whoId, result, { date, sentTo }) {\n  const text = decisionText(result, { date, sentTo });\n  return { WhoId: String(whoId), Subject: oneLine(text.subject, SUBJECT_LIMIT), Description: text.description, Status: 'Completed', Priority: 'Normal', ActivityDate: date };\n}\n\nfunction maskSecrets(value) {\n  return String(value ?? '')\n    .replace(/Bearer\\s+[^\\s\"']+/gi, 'Bearer ***')\n    .replace(/\\bsk-[A-Za-z0-9_-]+/g, '***')\n    .replace(/\\b00D[A-Za-z0-9]{12,15}![A-Za-z0-9._]+/g, '***')\n    .replace(/https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g, 'https://hooks.slack.com/***');\n}\n\nfunction formatAlert(payload = {}, baseUrl = 'http://localhost:5680') {\n  const workflow = payload.workflow || {};\n  const execution = payload.execution || {};\n  const message = maskSecrets((execution.error && execution.error.message) || 'Unknown error');\n  const url = `${baseUrl}/workflow/${workflow.id || ''}/executions/${execution.id || ''}`;\n  return { text: `:rotating_light: Lead intake workflow error\\nWorkflow: ${workflow.name || workflow.id || 'unknown'}\\nNode: ${execution.lastNodeExecuted || 'unknown'}\\nError: ${message}\\n${url}`, url };\n}\n\nfunction rejectedInputAlert(inquiry, reason) {\n  const who = inquiry.email || inquiry.phone || inquiry.name || 'unknown sender';\n  return `:warning: Inquiry not accepted (${reason}) from ${who} via ${inquiry.source}. Nothing was written to Salesforce; please follow up by hand if needed.`;\n}\n\nfunction llmFailureAlert(inquiry, qualification, link) {\n  return `:warning: AI classification failed for ${inquiry.email || inquiry.phone} (${qualification.llm_error}). The lead was saved in Salesforce as Needs review with no draft reply: ${link}`;\n}\n\nfunction reviewAlert(inquiry, qualification, reviewUrl) {\n  return `:incoming_envelope: New lead: ${inquiry.name || inquiry.email} (${qualification.tier}, ${qualification.urgency} urgency) — review the draft reply: ${reviewUrl}`;\n}\n\nfunction buildRunLog({ inquiry, fixtureId = null, recordType = null, recordId = null, matchedBy = null, action, qualification = null, draft = 'none', sentTo = null, reviewer = null, edited = null, alerts = [], executionId = null }) {\n  return {\n    ts: new Date().toISOString(),\n    execution_id: executionId,\n    source_id: inquiry.source_id,\n    source: inquiry.source,\n    fixture_id: fixtureId,\n    email: inquiry.email,\n    record_type: recordType,\n    record_id: recordId,\n    matched_by: matchedBy,\n    action,\n    tier: qualification ? qualification.tier : null,\n    llm_ok: qualification ? qualification.llm_ok : null,\n    llm_error: qualification ? qualification.llm_error : null,\n    draft,\n    reviewer,\n    edited,\n    sent_to: sentTo,\n    alerts,\n  };\n}\n\nconst inquiry = $('Normalize form').first().json;\nreturn [{ json: { runLog: { inquiry, action: 'rejected_input', alerts: [rejectedInputAlert(inquiry, inquiry.validation.reason)] } } }];"
+      }
+    },
+    {
+      "id": "write-run-log",
+      "name": "Write run log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        320
+      ],
+      "parameters": {
+        "jsCode": "// Human approval: review page, decision parsing and the outgoing reply (SPEC §6).\r\n\r\nfunction escapeHtml(value) {\r\n  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\r\n}\r\n\r\nfunction safeId(sourceId) {\r\n  return String(sourceId || 'unknown').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);\r\n}\r\n\r\nconst TIER_LABEL = { qualified: 'Qualified', needs_review: 'Needs review', not_qualified: 'Not qualified' };\r\n\r\nfunction buildReviewPage({ inquiry, qualification, draft, recordUrl, resumeUrl }) {\r\n  const row = (label, value) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`;\r\n  return `<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\r\n<title>Reply review: ${escapeHtml(inquiry.name || inquiry.email || 'new lead')}</title>\r\n<style>body{font:16px/1.5 system-ui,sans-serif;max-width:860px;margin:2rem auto;padding:0 16px;background:#f4f6f8;color:#1d2430}\r\nsection{background:#fff;border-radius:10px;padding:1rem 1.25rem;margin:1rem 0;box-shadow:0 1px 2px #0001}\r\nh1{font-size:1.4rem}h2{font-size:1.05rem;margin:.2rem 0 .8rem}th{text-align:left;color:#5b6575;font-weight:600;padding:.2rem 1rem .2rem 0;vertical-align:top;white-space:nowrap}\r\n.msg{white-space:pre-wrap;background:#f7f8fa;border-radius:6px;padding:.75rem}.tier{display:inline-block;border-radius:999px;padding:.1rem .6rem;background:#e7f0ff;color:#1747a6;font-weight:600}\r\nlabel{display:block;margin:.8rem 0 .3rem;font-weight:600}input[type=text],textarea{width:100%;box-sizing:border-box;font:inherit;padding:.5rem;border:1px solid #c9cfd8;border-radius:6px}\r\ntextarea{min-height:12rem}.choices label{display:inline-block;font-weight:500;margin-right:1.5rem}button{font:inherit;font-weight:600;background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:.6rem 1.2rem;cursor:pointer}\r\n.note{color:#5b6575;font-size:.9rem}</style></head><body>\r\n<h1>Review the AI draft before anything is sent</h1>\r\n<section><h2>Inquiry</h2><table>\r\n${row('From', `${inquiry.name || '(no name)'} <${inquiry.email || 'no email'}>`)}\r\n${row('Phone', inquiry.phone || '(not given)')}\r\n${row('Company', inquiry.company || '(not given)')}\r\n${row('Source', `${inquiry.source} · ${inquiry.received_at}`)}\r\n${row('Subject', inquiry.subject || '(none)')}\r\n</table><p class=\"msg\">${escapeHtml(inquiry.message)}</p>\r\n<p><a href=\"${escapeHtml(recordUrl)}\">Open record in Salesforce</a></p></section>\r\n<section><h2>AI classification</h2><p><span class=\"tier\">${escapeHtml(TIER_LABEL[qualification.tier] || qualification.tier)}</span> · ${escapeHtml(qualification.topic)} · urgency ${escapeHtml(qualification.urgency)}</p><p>${escapeHtml(qualification.reason)}</p></section>\r\n<section><h2>Draft reply</h2><form method=\"POST\" action=\"${escapeHtml(resumeUrl)}\" enctype=\"application/x-www-form-urlencoded\">\r\n<label for=\"subject\">Subject</label><input type=\"text\" id=\"subject\" name=\"subject\" value=\"${escapeHtml(draft.subject)}\">\r\n<label for=\"body\">Message</label><textarea id=\"body\" name=\"body\">${escapeHtml(draft.body)}</textarea>\r\n<label>Decision</label><div class=\"choices\"><label><input type=\"radio\" name=\"decision\" value=\"approve\"> Approve and send</label><label><input type=\"radio\" name=\"decision\" value=\"reject\"> Reject, send nothing</label></div>\r\n<label for=\"reviewer\">Your name</label><input type=\"text\" id=\"reviewer\" name=\"reviewer\" required>\r\n<p class=\"note\">Nothing is sent until you approve. Your name is saved on the Salesforce record with the decision.</p>\r\n<button type=\"submit\">Submit review</button></form></section></body></html>`;\r\n}\r\n\r\nfunction parseDecision(body, draft) {\r\n  if (body == null) return { timedOut: true, errors: [] };\r\n  const errors = [];\r\n  const reviewer = String(body.reviewer || '').trim();\r\n  const decision = String(body.decision || '').trim();\r\n  if (!reviewer) errors.push('Your name is required');\r\n  if (!['approve', 'reject'].includes(decision)) errors.push('Choose Approve or Reject');\r\n  const subject = String(body.subject ?? draft.subject).trim();\r\n  const text = String(body.body ?? draft.body).replace(/\\r\\n/g, '\\n').trim();\r\n  if (decision === 'approve' && (!subject || !text)) errors.push('Subject and message cannot be empty');\r\n  const edited = subject !== String(draft.subject).trim() || text !== String(draft.body).replace(/\\r\\n/g, '\\n').trim();\r\n  return { timedOut: false, errors, reviewer, decision, subject, body: text, edited };\r\n}\r\n\r\nfunction outgoingEmail({ to, subject, body, demoMode, redirectTo }) {\r\n  if (demoMode) {\r\n    if (!redirectTo) throw new Error('DEMO_MODE=1 needs REPLY_REDIRECT_TO; refusing to email a demo address');\r\n    return { to: redirectTo, subject: `[demo → ${to}] ${subject}`, body };\r\n  }\r\n  return { to, subject, body };\r\n}\r\n\r\nfunction errorPage(errors) {\r\n  return `<!doctype html><html><head><meta charset=\"utf-8\"><title>Review not accepted</title></head><body style=\"font:16px system-ui;max-width:640px;margin:3rem auto\"><h1>Review not accepted</h1><ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join('')}</ul><p>Go back, fix the form and submit again. Nothing was sent.</p></body></html>`;\r\n}\r\n\r\nfunction receiptPage(text) {\r\n  return `<!doctype html><html><head><meta charset=\"utf-8\"><title>Review received</title></head><body style=\"font:16px system-ui;max-width:640px;margin:3rem auto\"><h1>${escapeHtml(text)}</h1></body></html>`;\r\n}\n\n// Salesforce Tasks, Slack texts and the run log; every number here comes from code, not the AI.\n\nconst SUBJECT_LIMIT = 255;\n\nfunction oneLine(text, limit) {\n  const flat = String(text ?? '').replace(/\\s+/g, ' ').trim();\n  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction inquiryDescription(inquiry, qualification) {\n  const header = [`[${inquiry.source}] ${inquiry.received_at}`, ...(inquiry.subject ? [inquiry.subject] : [])];\n  const ai = `AI: ${qualification.tier} / ${qualification.topic} / ${qualification.urgency} — ${qualification.reason}`;\n  return [...header, '', inquiry.message, '', ai].join('\\n');\n}\n\nfunction decisionText(result, { date, sentTo }) {\n  if (result.timedOut) return { subject: 'AI reply review timed out', description: 'Reply drafted by AI; review timed out, nothing sent.' };\n  if (result.decision === 'approve') {\n    return {\n      subject: `AI reply approved by ${result.reviewer}`,\n      description: `Reply drafted by AI, edited: ${result.edited ? 'yes' : 'no'}, approved by ${result.reviewer} on ${date}, sent to ${sentTo}.\\n\\nSubject: ${result.subject}\\n\\n${result.body}`,\n    };\n  }\n  return { subject: `AI reply rejected by ${result.reviewer}`, description: `Reply drafted by AI, rejected by ${result.reviewer} on ${date}, nothing sent.` };\n}\n\n// One Task per inquiry, linked to the Lead or Contact; Inquiry_Source_ID__c is what repeat detection looks up.\nfunction inquiryTask(whoId, inquiry, qualification) {\n  // Form inquiries carry a fixed subject (\"Website contact form\"), so their Tasks show the start of the message.\n  const topic = inquiry.source === 'email' && inquiry.subject ? inquiry.subject : inquiry.message;\n  return {\n    WhoId: String(whoId),\n    Subject: oneLine(`Inquiry via ${inquiry.source}: ${topic}`, Math.min(SUBJECT_LIMIT, `Inquiry via ${inquiry.source}: `.length + 60)),\n    Description: inquiryDescription(inquiry, qualification),\n    Status: 'Completed',\n    Priority: 'Normal',\n    ActivityDate: String(inquiry.received_at || new Date().toISOString()).slice(0, 10),\n    Inquiry_Source_ID__c: inquiry.source_id,\n  };\n}\n\nfunction decisionTask(whoId, result, { date, sentTo }) {\n  const text = decisionText(result, { date, sentTo });\n  return { WhoId: String(whoId), Subject: oneLine(text.subject, SUBJECT_LIMIT), Description: text.description, Status: 'Completed', Priority: 'Normal', ActivityDate: date };\n}\n\nfunction maskSecrets(value) {\n  return String(value ?? '')\n    .replace(/Bearer\\s+[^\\s\"']+/gi, 'Bearer ***')\n    .replace(/\\bsk-[A-Za-z0-9_-]+/g, '***')\n    .replace(/\\b00D[A-Za-z0-9]{12,15}![A-Za-z0-9._]+/g, '***')\n    .replace(/https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g, 'https://hooks.slack.com/***');\n}\n\nfunction formatAlert(payload = {}, baseUrl = 'http://localhost:5680') {\n  const workflow = payload.workflow || {};\n  const execution = payload.execution || {};\n  const message = maskSecrets((execution.error && execution.error.message) || 'Unknown error');\n  const url = `${baseUrl}/workflow/${workflow.id || ''}/executions/${execution.id || ''}`;\n  return { text: `:rotating_light: Lead intake workflow error\\nWorkflow: ${workflow.name || workflow.id || 'unknown'}\\nNode: ${execution.lastNodeExecuted || 'unknown'}\\nError: ${message}\\n${url}`, url };\n}\n\nfunction rejectedInputAlert(inquiry, reason) {\n  const who = inquiry.email || inquiry.phone || inquiry.name || 'unknown sender';\n  return `:warning: Inquiry not accepted (${reason}) from ${who} via ${inquiry.source}. Nothing was written to Salesforce; please follow up by hand if needed.`;\n}\n\nfunction llmFailureAlert(inquiry, qualification, link) {\n  return `:warning: AI classification failed for ${inquiry.email || inquiry.phone} (${qualification.llm_error}). The lead was saved in Salesforce as Needs review with no draft reply: ${link}`;\n}\n\nfunction reviewAlert(inquiry, qualification, reviewUrl) {\n  return `:incoming_envelope: New lead: ${inquiry.name || inquiry.email} (${qualification.tier}, ${qualification.urgency} urgency) — review the draft reply: ${reviewUrl}`;\n}\n\nfunction buildRunLog({ inquiry, fixtureId = null, recordType = null, recordId = null, matchedBy = null, action, qualification = null, draft = 'none', sentTo = null, reviewer = null, edited = null, alerts = [], executionId = null }) {\n  return {\n    ts: new Date().toISOString(),\n    execution_id: executionId,\n    source_id: inquiry.source_id,\n    source: inquiry.source,\n    fixture_id: fixtureId,\n    email: inquiry.email,\n    record_type: recordType,\n    record_id: recordId,\n    matched_by: matchedBy,\n    action,\n    tier: qualification ? qualification.tier : null,\n    llm_ok: qualification ? qualification.llm_ok : null,\n    llm_error: qualification ? qualification.llm_error : null,\n    draft,\n    reviewer,\n    edited,\n    sent_to: sentTo,\n    alerts,\n  };\n}\n\n// OpenAI requests and the checks that decide whether an AI answer can be used (SPEC §5).\n\nconst TIERS = ['qualified', 'needs_review', 'not_qualified'];\nconst TOPICS = ['regular_cleaning', 'deep_cleaning', 'quote_request', 'complaint', 'job_application', 'sales_pitch', 'other'];\nconst URGENCIES = ['high', 'normal', 'low'];\nconst BROKEN_MODEL = 'does-not-exist-model';\n\nfunction fillTemplate(template, values) {\n  return String(template).replace(/\\{\\{(\\w+)\\}\\}/g, (_, key) => (values[key] == null ? '' : String(values[key])));\n}\n\nfunction inquiryText(inquiry) {\n  return [\n    `Source: ${inquiry.source}`,\n    `Name: ${inquiry.name || '(not given)'}`,\n    `Company: ${inquiry.company || '(not given)'}`,\n    `Subject: ${inquiry.subject || '(none)'}`,\n    'Message:',\n    inquiry.message,\n  ].join('\\n');\n}\n\nfunction chatRequest(prompt, userContent, schemaName, modelOverride) {\n  const request = {\n    messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: userContent }],\n    response_format: { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema: prompt.schema } },\n    temperature: 0,\n  };\n  if (modelOverride) request.model = modelOverride;\n  return request;\n}\n\nfunction buildQualifyRequest(inquiry, prompt) {\n  const override = inquiry.demo_flags && inquiry.demo_flags.break_llm ? BROKEN_MODEL : undefined;\n  return chatRequest(prompt, fillTemplate(prompt.userTemplate, { inquiry: inquiryText(inquiry) }), 'lead_qualification', override);\n}\n\nfunction buildDraftRequest(inquiry, qualification, prompt) {\n  const content = fillTemplate(prompt.userTemplate, { inquiry: inquiryText(inquiry), tier: qualification.tier, topic: qualification.topic, urgency: qualification.urgency });\n  return chatRequest(prompt, content, 'reply_draft');\n}\n\nfunction readLlmJson(response) {\n  if (!response) return { data: null, error: 'empty_response' };\n  if (response.error) {\n    const error = response.error;\n    const status = error.httpCode || error.status || (error.cause && error.cause.status) || '';\n    return { data: null, error: `api_error${status ? `_${status}` : ''}` };\n  }\n  const content = response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;\n  if (!content) return { data: null, error: 'empty_response' };\n  try {\n    return { data: JSON.parse(content), error: null };\n  } catch (e) {\n    return { data: null, error: 'invalid_json' };\n  }\n}\n\nconst squash = (text) => String(text || '').replace(/\\s+/g, ' ').trim().toLowerCase();\n\nfunction validateQualification(data, message) {\n  const errors = [];\n  if (!data || typeof data !== 'object') return { valid: false, errors: ['not_an_object'] };\n  if (!TIERS.includes(data.tier)) errors.push('bad_tier');\n  if (!TOPICS.includes(data.topic)) errors.push('bad_topic');\n  if (!URGENCIES.includes(data.urgency)) errors.push('bad_urgency');\n  if (!String(data.reason || '').trim()) errors.push('missing_reason');\n  const quote = squash(data.quote);\n  if (!quote || !squash(message).includes(quote)) errors.push('quote_not_in_message');\n  return { valid: errors.length === 0, errors };\n}\n\n// A verbatim quote that runs long is cut at a word boundary; it stays a prefix of the original text.\nconst QUOTE_LIMIT = 160;\nfunction shortenQuote(quote) {\n  const text = String(quote).replace(/\\s+/g, ' ').trim();\n  if (text.length <= QUOTE_LIMIT) return text;\n  const cut = text.slice(0, QUOTE_LIMIT);\n  return `${cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : QUOTE_LIMIT).replace(/[\\s,;:.]+$/, '')}…`;\n}\n\nfunction qualificationFromLlm(response, message) {\n  const parsed = readLlmJson(response);\n  if (parsed.error) return fallbackQualification(parsed.error);\n  const checked = validateQualification(parsed.data, message);\n  if (!checked.valid) return fallbackQualification(`validation_failed:${checked.errors.join(',')}`);\n  const { tier, topic, urgency, reason, quote } = parsed.data;\n  return { tier, topic, urgency, reason: `${reason.trim()} Quote: \"${shortenQuote(quote)}\"`, llm_ok: true, llm_error: null };\n}\n\nfunction fallbackQualification(errorClass) {\n  return {\n    tier: 'needs_review',\n    topic: 'other',\n    urgency: 'normal',\n    reason: `AI classification failed: ${errorClass}; needs a human look.`,\n    llm_ok: false,\n    llm_error: errorClass,\n  };\n}\n\nfunction draftFromLlm(response) {\n  const parsed = readLlmJson(response);\n  if (parsed.error) return { ok: false, error: parsed.error };\n  const { subject, body } = parsed.data || {};\n  const words = String(body || '').trim().split(/\\s+/).filter(Boolean).length;\n  if (!String(subject || '').trim() || !words) return { ok: false, error: 'missing_subject_or_body' };\n  if (words > 160) return { ok: false, error: 'body_too_long' };\n  return { ok: true, subject: subject.trim(), body: body.trim() };\n}\n\nfunction fixtureIdFor(sourceId, fixtures = []) {\n  for (const fixture of fixtures) {\n    if (fixture.channel === 'form' && sourceId === `form:${fixture.submission_id}`) return fixture.id;\n    if (fixture.channel === 'email' && sourceId === `email:${fixture.message_id}`) return fixture.id;\n  }\n  return null;\n}\n\n// Mock mode reads a stored answer instead of calling OpenAI; a missing file behaves like an API failure.\nfunction mockResponse(fileContent, breakLlm) {\n  if (breakLlm) return { error: { message: `The model \\`${BROKEN_MODEL}\\` does not exist (mock)`, httpCode: '404' } };\n  if (!fileContent) return { error: { message: 'mock file missing', httpCode: 'mock_missing' } };\n  return { choices: [{ message: { content: fileContent } }] };\n}\n\nconst fs = require('fs');\nconst entry = $input.first().json.runLog;\nconst fixtures = JSON.parse(require('fs').readFileSync('/files/sample-data/fixtures.json', 'utf8')).fixtures;\nconst log = buildRunLog({ ...entry, fixtureId: fixtureIdFor(entry.inquiry.source_id, fixtures), executionId: $execution.id });\nconst name = safeId(entry.inquiry.source_id);\nfs.mkdirSync('/files/output/run-log', { recursive: true });\nfs.writeFileSync('/files/output/run-log/' + Date.now() + '-' + name + '.json', JSON.stringify(log, null, 2), 'utf8');\nconst reviewFile = '/files/output/review/' + name + '.json';\nif (log.draft !== 'none' && fs.existsSync(reviewFile)) {\n  const review = JSON.parse(fs.readFileSync(reviewFile, 'utf8'));\n  fs.writeFileSync(reviewFile, JSON.stringify({ ...review, status: log.draft, closed_at: log.ts }, null, 2), 'utf8');\n}\nreturn [{ json: log }];"
+      }
+    },
+    {
+      "id": "any-alerts",
+      "name": "Any alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1340,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "any-alerts-condition",
+              "leftValue": "={{ $json.alerts.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-alert",
+      "name": "Send alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        220
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.alerts.join('\\n') }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Receive form inquiry": {
+      "main": [
+        [
+          {
+            "node": "Normalize form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize form": {
+      "main": [
+        [
+          {
+            "node": "Valid inquiry?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid inquiry?": {
+      "main": [
+        [
+          {
+            "node": "Respond 202 accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400 rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 202 accepted": {
+      "main": [
+        [
+          {
+            "node": "Process inquiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond 400 rejected": {
+      "main": [
+        [
+          {
+            "node": "Log rejected input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log rejected input": {
+      "main": [
+        [
+          {
+            "node": "Write run log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write run log": {
+      "main": [
+        [
+          {
+            "node": "Any alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any alerts?": {
+      "main": [
+        [
+          {
+            "node": "Send alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "versionId": "1"
+}

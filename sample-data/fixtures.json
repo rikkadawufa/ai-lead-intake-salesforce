@@ -1,0 +1,175 @@
+{
+  "note": "Made-up inquiries for the Tidewell Commercial Cleaning demo. Every person, company and address here is fictional; emails use the reserved example.com/example.org domains and phones use the 555-01xx range. T9 writes in as an existing Salesforce Contact that salesforce_setup.py creates from seed_contacts.",
+  "fixtures": [
+    {
+      "id": "T1",
+      "title": "Qualified form inquiry",
+      "channel": "form",
+      "submission_id": "tw-demo-0001",
+      "payload": {
+        "name": "Dana Whitfield",
+        "email": "dana.whitfield@example.com",
+        "phone": "(510) 555-0142",
+        "company": "Harborview Dental Group",
+        "message": "Hi, we're looking for weekly after-hours cleaning for our dental office in Oakland, about 3,200 sq ft with 6 treatment rooms. Ideally starting the first week of December. Could someone come by for a walkthrough?"
+      },
+      "expect": {
+        "action": "created",
+        "tier": "qualified",
+        "draft": "approved",
+        "edited": true
+      }
+    },
+    {
+      "id": "T2",
+      "title": "Same person follows up by email",
+      "channel": "email",
+      "message_id": "<t2.followup@tidewell-demo.example.com>",
+      "from_name": "Dana Whitfield",
+      "reply_to": "dana.whitfield@example.com",
+      "subject": "Re: Cleaning for Harborview Dental",
+      "body": "Hi again,\n\nQuick follow-up on the form I sent earlier today. Is a Tuesday or Thursday evening walkthrough possible? Our office manager Priya can meet you there.\n\nThanks,\nDana",
+      "expect": {
+        "action": "updated",
+        "same_record_as": "T1",
+        "inquiry_tasks": 2,
+        "final_tier": "qualified",
+        "draft": "approved",
+        "edited": false
+      }
+    },
+    {
+      "id": "T3",
+      "title": "Same form submission sent twice",
+      "channel": "form",
+      "resend_of": "T1",
+      "expect": {
+        "action": "duplicate_submission",
+        "same_record_as": "T1",
+        "draft": "none"
+      }
+    },
+    {
+      "id": "T4",
+      "title": "Sales pitch by email",
+      "channel": "email",
+      "message_id": "<t4.pitch@tidewell-demo.example.com>",
+      "from_name": "Jordan Blake",
+      "reply_to": "jordan.blake@example.org",
+      "subject": "Get Tidewell to #1 on Google this month",
+      "body": "Hello,\n\nI run an SEO agency and noticed your website isn't ranking for \"office cleaning Oakland\". We can get you to the top 3 in 30 days for a flat $499. Want me to send a free audit?\n\nBest,\nJordan",
+      "expect": {
+        "action": "created",
+        "tier": "not_qualified",
+        "draft": "none"
+      }
+    },
+    {
+      "id": "T5",
+      "title": "Vague price question",
+      "channel": "form",
+      "submission_id": "tw-demo-0005",
+      "payload": {
+        "name": "Sam Okafor",
+        "email": "sam.okafor@example.com",
+        "phone": "",
+        "company": "",
+        "message": "How much do you charge?"
+      },
+      "expect": {
+        "action": "created",
+        "tier": "needs_review",
+        "draft": "rejected"
+      }
+    },
+    {
+      "id": "T6",
+      "title": "No email and no phone",
+      "channel": "form",
+      "submission_id": "tw-demo-0006",
+      "payload": {
+        "name": "Alex",
+        "email": "",
+        "phone": "",
+        "company": "",
+        "message": "Please call me back about cleaning for our office."
+      },
+      "expect": {
+        "http_status": 400,
+        "record_created": false,
+        "alert": true
+      }
+    },
+    {
+      "id": "T7",
+      "title": "OpenAI returns an error",
+      "channel": "form",
+      "submission_id": "tw-demo-0007",
+      "break_llm": true,
+      "payload": {
+        "name": "Riley Chen",
+        "email": "riley.chen@example.com",
+        "phone": "510-555-0177",
+        "company": "Chen & Ortiz CPAs",
+        "message": "Our 12-person accounting firm in Berkeley needs nightly cleaning, around 2,500 sq ft. Can you send a proposal?"
+      },
+      "expect": {
+        "action": "created",
+        "tier": "needs_review",
+        "llm_ok": false,
+        "draft": "none",
+        "alert": true
+      }
+    },
+    {
+      "id": "T9",
+      "title": "Existing customer (a Contact) writes in",
+      "channel": "email",
+      "message_id": "<t9.existing@tidewell-demo.example.com>",
+      "from_name": "Avery Brooks",
+      "reply_to": "avery.brooks@example.com",
+      "subject": "Adding carpet cleaning next month",
+      "body": "Hi Tidewell team,\n\nThe monthly deep clean at our clinic has been great. Could you add carpet cleaning for the waiting room and two exam rooms next month? The same visit day is fine.\n\nThanks,\nAvery",
+      "extra": true,
+      "expect": {
+        "action": "updated",
+        "record_type": "Contact",
+        "same_record_as_seed": "avery.brooks@example.com",
+        "lead_created": false,
+        "draft": "rejected"
+      }
+    }
+  ],
+  "reviews": [
+    {
+      "fixture": "T1",
+      "decision": "approve",
+      "reviewer": "Morgan Lee (Ops)",
+      "edit_body": "Hi Dana,\n\nThanks for reaching out about Harborview Dental. Weekly after-hours cleaning for a 3,200 sq ft office is exactly what we do. I'd like to set up a short walkthrough so we can see the treatment rooms and talk through your checklist. What evening works for you next week?\n\nTidewell Commercial Cleaning team"
+    },
+    {
+      "fixture": "T2",
+      "decision": "approve",
+      "reviewer": "Morgan Lee (Ops)"
+    },
+    {
+      "fixture": "T5",
+      "decision": "reject",
+      "reviewer": "Morgan Lee (Ops)"
+    },
+    {
+      "fixture": "T9",
+      "decision": "reject",
+      "reviewer": "Morgan Lee (Ops)"
+    }
+  ],
+  "seed_contacts": [
+    {
+      "first_name": "Avery",
+      "last_name": "Brooks",
+      "email": "avery.brooks@example.com",
+      "phone": "+15105550188",
+      "account": "Brookside Veterinary (demo)"
+    }
+  ]
+}

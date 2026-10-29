@@ -1,0 +1,34 @@
+name: lead-intake-sf-demo
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-stable}
+    restart: unless-stopped
+    ports:
+      # 5678 and 5679 are taken by the UAT and HubSpot demos; this one runs side by side on 5680.
+      - "127.0.0.1:5680:5678"
+    environment:
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Taipei}
+      - TZ=${GENERIC_TIMEZONE:-Asia/Taipei}
+      - WEBHOOK_URL=http://localhost:5680/
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs,path,crypto
+      # Non-secret values only. The Salesforce secret, keys and the app password live in n8n credentials (scripts/n8n_setup.py).
+      - LLM_MODE=${LLM_MODE:-mock}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - GMAIL_ADDRESS=${GMAIL_ADDRESS}
+      - REPLY_REDIRECT_TO=${REPLY_REDIRECT_TO}
+      - DEMO_MODE=${DEMO_MODE:-1}
+      - SF_INSTANCE_URL=${SF_INSTANCE_URL}
+      - SF_API_VERSION=${SF_API_VERSION:-v63.0}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./sample-data:/files/sample-data:ro
+      - ./prompts:/files/prompts:ro
+      - ./workflows:/files/workflows:ro
+      - ./output:/files/output
+
+volumes:
+  n8n_data:

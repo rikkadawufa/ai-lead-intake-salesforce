@@ -1,0 +1,71 @@
+{
+  "summary": {
+    "passed": 8,
+    "total": 8,
+    "demo_contacts": 4
+  },
+  "rows": [
+    {
+      "id": "T1",
+      "title": "Qualified form inquiry",
+      "pass": true,
+      "observed": "action=created; tier=qualified; draft=approved; edited=True",
+      "problems": []
+    },
+    {
+      "id": "T2",
+      "title": "Same person follows up by email",
+      "pass": true,
+      "observed": "action=updated; same contact as T1=True; inquiry notes on contact=2; final tier=qualified; draft=approved; edited=False",
+      "problems": []
+    },
+    {
+      "id": "T3",
+      "title": "Same form submission sent twice",
+      "pass": true,
+      "observed": "action=duplicate_submission; same contact as T1=True; drafts for this submission=1",
+      "problems": []
+    },
+    {
+      "id": "T4",
+      "title": "Sales pitch by email",
+      "pass": true,
+      "observed": "action=created; tier=not_qualified; draft=none",
+      "problems": []
+    },
+    {
+      "id": "T5",
+      "title": "Vague price question",
+      "pass": true,
+      "observed": "action=created; tier=needs_review; draft=rejected; sent=None",
+      "problems": []
+    },
+    {
+      "id": "T6",
+      "title": "No email and no phone",
+      "pass": true,
+      "observed": "HTTP status=400; Slack alert=1; HubSpot contact=None",
+      "problems": []
+    },
+    {
+      "id": "T7",
+      "title": "OpenAI returns an error",
+      "pass": true,
+      "observed": "action=created; tier=needs_review; llm_ok=False; draft=none; Slack alert=1",
+      "problems": []
+    },
+    {
+      "id": "T8",
+      "title": "Human review: edit + approve, approve, reject",
+      "pass": true,
+      "observed": "incomplete review refused=422; T1 reply sent to demo inbox=demo inbox; T1 reviewer=Morgan Lee (Ops); emails with the edited T1 text=1; T5 nothing sent=None; replies in demo inbox=2",
+      "problems": []
+    }
+  ],
+  "source": {
+    "project": "AI Lead Intake for HubSpot (github.com/rikkadawufa/ai-lead-intake-hubspot)",
+    "run": "live OpenAI round 2",
+    "generated": "2026-10-29T00:36:56",
+    "note": "Copied from that project; the demo inbox address is replaced with \"demo inbox\"."
+  }
+}

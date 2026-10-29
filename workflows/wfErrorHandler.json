@@ -1,0 +1,121 @@
+{
+  "id": "wfErrorHandler",
+  "name": "Lead intake: error handler",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "note-about",
+      "name": "About",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -60
+      ],
+      "parameters": {
+        "content": "## Error handler\nAny failed node in the lead intake workflows posts a masked alert to Slack and keeps a local error log.",
+        "width": 900,
+        "height": 140,
+        "color": 1
+      }
+    },
+    {
+      "id": "error-trigger",
+      "name": "Error trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "format-alert",
+      "name": "Format alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Salesforce Tasks, Slack texts and the run log; every number here comes from code, not the AI.\n\nconst SUBJECT_LIMIT = 255;\n\nfunction oneLine(text, limit) {\n  const flat = String(text ?? '').replace(/\\s+/g, ' ').trim();\n  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction inquiryDescription(inquiry, qualification) {\n  const header = [`[${inquiry.source}] ${inquiry.received_at}`, ...(inquiry.subject ? [inquiry.subject] : [])];\n  const ai = `AI: ${qualification.tier} / ${qualification.topic} / ${qualification.urgency} — ${qualification.reason}`;\n  return [...header, '', inquiry.message, '', ai].join('\\n');\n}\n\nfunction decisionText(result, { date, sentTo }) {\n  if (result.timedOut) return { subject: 'AI reply review timed out', description: 'Reply drafted by AI; review timed out, nothing sent.' };\n  if (result.decision === 'approve') {\n    return {\n      subject: `AI reply approved by ${result.reviewer}`,\n      description: `Reply drafted by AI, edited: ${result.edited ? 'yes' : 'no'}, approved by ${result.reviewer} on ${date}, sent to ${sentTo}.\\n\\nSubject: ${result.subject}\\n\\n${result.body}`,\n    };\n  }\n  return { subject: `AI reply rejected by ${result.reviewer}`, description: `Reply drafted by AI, rejected by ${result.reviewer} on ${date}, nothing sent.` };\n}\n\n// One Task per inquiry, linked to the Lead or Contact; Inquiry_Source_ID__c is what repeat detection looks up.\nfunction inquiryTask(whoId, inquiry, qualification) {\n  // Form inquiries carry a fixed subject (\"Website contact form\"), so their Tasks show the start of the message.\n  const topic = inquiry.source === 'email' && inquiry.subject ? inquiry.subject : inquiry.message;\n  return {\n    WhoId: String(whoId),\n    Subject: oneLine(`Inquiry via ${inquiry.source}: ${topic}`, Math.min(SUBJECT_LIMIT, `Inquiry via ${inquiry.source}: `.length + 60)),\n    Description: inquiryDescription(inquiry, qualification),\n    Status: 'Completed',\n    Priority: 'Normal',\n    ActivityDate: String(inquiry.received_at || new Date().toISOString()).slice(0, 10),\n    Inquiry_Source_ID__c: inquiry.source_id,\n  };\n}\n\nfunction decisionTask(whoId, result, { date, sentTo }) {\n  const text = decisionText(result, { date, sentTo });\n  return { WhoId: String(whoId), Subject: oneLine(text.subject, SUBJECT_LIMIT), Description: text.description, Status: 'Completed', Priority: 'Normal', ActivityDate: date };\n}\n\nfunction maskSecrets(value) {\n  return String(value ?? '')\n    .replace(/Bearer\\s+[^\\s\"']+/gi, 'Bearer ***')\n    .replace(/\\bsk-[A-Za-z0-9_-]+/g, '***')\n    .replace(/\\b00D[A-Za-z0-9]{12,15}![A-Za-z0-9._]+/g, '***')\n    .replace(/https:\\/\\/hooks\\.slack\\.com\\/[^\\s\"']+/g, 'https://hooks.slack.com/***');\n}\n\nfunction formatAlert(payload = {}, baseUrl = 'http://localhost:5680') {\n  const workflow = payload.workflow || {};\n  const execution = payload.execution || {};\n  const message = maskSecrets((execution.error && execution.error.message) || 'Unknown error');\n  const url = `${baseUrl}/workflow/${workflow.id || ''}/executions/${execution.id || ''}`;\n  return { text: `:rotating_light: Lead intake workflow error\\nWorkflow: ${workflow.name || workflow.id || 'unknown'}\\nNode: ${execution.lastNodeExecuted || 'unknown'}\\nError: ${message}\\n${url}`, url };\n}\n\nfunction rejectedInputAlert(inquiry, reason) {\n  const who = inquiry.email || inquiry.phone || inquiry.name || 'unknown sender';\n  return `:warning: Inquiry not accepted (${reason}) from ${who} via ${inquiry.source}. Nothing was written to Salesforce; please follow up by hand if needed.`;\n}\n\nfunction llmFailureAlert(inquiry, qualification, link) {\n  return `:warning: AI classification failed for ${inquiry.email || inquiry.phone} (${qualification.llm_error}). The lead was saved in Salesforce as Needs review with no draft reply: ${link}`;\n}\n\nfunction reviewAlert(inquiry, qualification, reviewUrl) {\n  return `:incoming_envelope: New lead: ${inquiry.name || inquiry.email} (${qualification.tier}, ${qualification.urgency} urgency) — review the draft reply: ${reviewUrl}`;\n}\n\nfunction buildRunLog({ inquiry, fixtureId = null, recordType = null, recordId = null, matchedBy = null, action, qualification = null, draft = 'none', sentTo = null, reviewer = null, edited = null, alerts = [], executionId = null }) {\n  return {\n    ts: new Date().toISOString(),\n    execution_id: executionId,\n    source_id: inquiry.source_id,\n    source: inquiry.source,\n    fixture_id: fixtureId,\n    email: inquiry.email,\n    record_type: recordType,\n    record_id: recordId,\n    matched_by: matchedBy,\n    action,\n    tier: qualification ? qualification.tier : null,\n    llm_ok: qualification ? qualification.llm_ok : null,\n    llm_error: qualification ? qualification.llm_error : null,\n    draft,\n    reviewer,\n    edited,\n    sent_to: sentTo,\n    alerts,\n  };\n}\n\nreturn [{ json: formatAlert($input.first().json) }];"
+      }
+    },
+    {
+      "id": "send-alert",
+      "name": "Send alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "write-error-log",
+      "name": "Write error log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst alert = $('Format alert').first().json;\nfs.mkdirSync('/files/output/run-log', { recursive: true });\nfs.appendFileSync('/files/output/run-log/errors.jsonl', JSON.stringify({ ts: new Date().toISOString(), ...alert }) + '\\n', 'utf8');\nreturn [{ json: alert }];"
+      }
+    }
+  ],
+  "connections": {
+    "Error trigger": {
+      "main": [
+        [
+          {
+            "node": "Format alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format alert": {
+      "main": [
+        [
+          {
+            "node": "Send alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send alert": {
+      "main": [
+        [
+          {
+            "node": "Write error log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "versionId": "1"
+}

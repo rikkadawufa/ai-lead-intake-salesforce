@@ -1,0 +1,16 @@
+.env
+output/*
+!output/.gitkeep
+__pycache__/
+*.py[cod]
+
+# local editor / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.venv/
+.pytest_cache/
+.claude/
+
+# screen-recording helper page, not part of the demo
+recording/

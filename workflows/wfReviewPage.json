@@ -1,0 +1,108 @@
+{
+  "id": "wfReviewPage",
+  "name": "Lead intake: review page",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "wfErrorHandler"
+  },
+  "nodes": [
+    {
+      "id": "note-about",
+      "name": "About",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -60
+      ],
+      "parameters": {
+        "content": "## Review page\n`GET /webhook/review?id=…` serves the saved review page so the Slack link opens in the browser.",
+        "width": 700,
+        "height": 140,
+        "color": 7
+      }
+    },
+    {
+      "id": "open-review-page",
+      "name": "Open review page",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "61e62b21-3a1a-56f7-6958-45df4fc372a1",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "review",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "load-review-page",
+      "name": "Load review page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst id = String(($input.first().json.query || {}).id || '');\nconst file = '/files/output/review/' + id + '.html';\nif (!/^[A-Za-z0-9._-]{1,80}$/.test(id) || !fs.existsSync(file)) return [{ json: { status: 404, html: '<!doctype html><meta charset=\"utf-8\"><p>Review page not found.</p>' } }];\nconst meta = JSON.parse(fs.readFileSync('/files/output/review/' + id + '.json', 'utf8'));\nconst html = fs.readFileSync(file, 'utf8');\nconst banner = meta.status === 'pending' ? '' : '<p style=\"font:600 16px system-ui;background:#fff4d6;padding:.75rem;border-radius:6px;max-width:860px;margin:1rem auto\">Already reviewed: ' + meta.status + '. Submitting again has no effect.</p>';\nreturn [{ json: { status: 200, html: html.replace('<body>', '<body>' + banner) } }];"
+      }
+    },
+    {
+      "id": "respond-with-page",
+      "name": "Respond with page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        200
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": "={{ $json.status }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Open review page": {
+      "main": [
+        [
+          {
+            "node": "Load review page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load review page": {
+      "main": [
+        [
+          {
+            "node": "Respond with page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "versionId": "1"
+}
