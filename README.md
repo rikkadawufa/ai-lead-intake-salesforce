@@ -81,7 +81,7 @@ Runs on a free Salesforce Developer Edition org, a Gmail test inbox and Slack, w
 - Phone matching, two extra form posts in the mock run: a number written as `510.555.0177` matched the Lead stored as `+15105550177`, and `510-555-0199` matched a Lead typed in by hand as `(510) 555-0199` through the phone search.
 - Live OpenAI (`gpt-4.1-mini`), first run: T1 to T8 8/8, T9 passed. The HubSpot version needed two live runs to get there; the fix it needed (shortening long quotes) was already in place here.
 
-[results/](results/) has both live results, and `scripts/compare_results.py` puts them side by side. Details, including what went wrong along the way, are in [docs/VERIFICATION.md](docs/VERIFICATION.md) (in Traditional Chinese).
+[results/](results/) has both live results, and `scripts/compare_results.py` puts them side by side. Details, including what went wrong along the way, are in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Known limitations
 

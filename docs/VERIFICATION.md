@@ -1,66 +1,66 @@
-# 驗證紀錄
+# Verification log
 
-環境：本機 Docker n8n 2.44.7（port 5680，compose 專案 `lead-intake-sf-demo`）、Salesforce Developer Edition（API v63.0，External Client App＋client credentials）、demo Gmail（沿用 HubSpot 版）、新的 Slack webhook（`#lead-alerts-salesforce`）。檢查 ID 對照 `SPEC.md` §9。日期 2026-10-30（台灣時間）。
+Environment: local Docker n8n 2.44.7 (port 5680, compose project `lead-intake-sf-demo`), Salesforce Developer Edition (API v63.0, External Client App + client credentials), the demo Gmail account (carried over from the HubSpot version), and a new Slack webhook (`#lead-alerts-salesforce`). Check IDs follow `SPEC.md` §9. Date 2026-10-30 (Taiwan time).
 
-## 9.1 離線
-| ID | 指令 | 結果 |
+## 9.1 Offline
+| ID | Command | Result |
 |---|---|---|
-| O1 | `node --test "n8n-src/code/*.test.js" "n8n-src/*.test.mjs"` | **PASS**：57 個測試全過 |
-| O2 | `python -m unittest discover tests_scripts` | **PASS**：25 個測試全過 |
-| O3 | `node n8n-src/build-workflows.mjs` 跑兩次後比對 | **PASS**：5 個 workflow，兩次輸出相同；Code node 語法檢查 0 錯誤；沒有 HubSpot 字樣 |
-| O4 | `python scripts/send_fixtures.py --dry-run` | **PASS**：列出 T1–T7、T9，沒有機密 |
+| O1 | `node --test "n8n-src/code/*.test.js" "n8n-src/*.test.mjs"` | **PASS**: all 57 tests pass |
+| O2 | `python -m unittest discover tests_scripts` | **PASS**: all 25 tests pass |
+| O3 | `node n8n-src/build-workflows.mjs` run twice and compared | **PASS**: 5 workflows, identical output both times; Code node syntax check found 0 errors; no mention of HubSpot |
+| O4 | `python scripts/send_fixtures.py --dry-run` | **PASS**: lists T1–T7 and T9, with no secrets |
 
-## 9.2 n8n 本機（mock LLM，真的 Salesforce／Gmail／Slack）
-| ID | 結果 |
+## 9.2 Local n8n (mock LLM, real Salesforce/Gmail/Slack)
+| ID | Result |
 |---|---|
-| N1 | **PASS**：`salesforce_setup.py` 建了 13 個欄位、permission set（13 筆欄位權限）並指派、T9 的 demo Account 與 Contact；再跑一次全部略過。Task 的 `Inquiry_Source_ID__c` 讀回是 unique＋externalId＋caseSensitive（Developer Edition 接受，沒有退回一般欄位） |
-| N2 | **PASS**：n8n 的 `oAuth2Api` credential（client credentials）自己換到 token，Composite 查詢成功。401 重換 token 還沒遇到過，沒有驗證 |
-| N3 | **PASS**：`reset_demo.py --apply` 刪掉 demo 記錄後重建 Avery，demo Lead 0、Contact 1 |
-| N4 | **PASS 8/8＋T9**：`send_fixtures.py` → `--review` → `collect_results.py`。Salesforce 有 4 個 Lead（Dana、Jordan、Sam、Riley）＋ Avery 的 Contact；Dana 底下 2 筆詢問 Task＋2 筆決定 Task；T9 掛在 Avery 的 Contact，沒有建 Lead；demo 收件匣 2 封 |
-| N5 | **PASS 9/9**：`send_fixtures.py --replay` 整批重送（含 3 封同 Message-ID 的信）→ 7 筆全是 `duplicate_submission`、沒有新草稿、T6 仍是 400、Lead／Contact 仍是 5 筆 |
-| N6 | **PASS**（另外手動送的兩份表單，不在 T1–T9 裡；沒有 mock 回答，所以 AI 走失敗路徑、Slack 有告警，這裡只看比對）：<br>・(a) 只有電話 `510.555.0177`、沒有 email → `matched_by=leadPhone`，更新 Riley 既有的 Lead<br>・(b) 先用 API 建一筆「人手輸入」的 Lead（Jamie，`(510) 555-0199`，沒有 E.164 欄位），約 5 分鐘後送只有電話 `510-555-0199` 的表單 → `matched_by=phoneSearch`，更新同一筆 Lead，`Phone` 保持原樣、`Phone_E164__c` 補上 `+15105550199`。兩次都沒有建新 Lead |
+| N1 | **PASS**: `salesforce_setup.py` created 13 fields, the permission set (13 field permissions) and its assignment, and T9's demo Account and Contact; a second run skipped everything. The Task field `Inquiry_Source_ID__c` reads back as unique + externalId + caseSensitive (Developer Edition accepts it; no fallback to a plain field) |
+| N2 | **PASS**: n8n's `oAuth2Api` credential (client credentials) fetched its own token, and the Composite lookup succeeded. A token refresh on 401 hasn't happened yet, so that part is unverified |
+| N3 | **PASS**: `reset_demo.py --apply` deleted the demo records and recreated Avery: 0 demo Leads, 1 Contact |
+| N4 | **PASS 8/8 + T9**: `send_fixtures.py` → `--review` → `collect_results.py`. Salesforce has 4 Leads (Dana, Jordan, Sam, Riley) + Avery's Contact. Dana has 2 inquiry Tasks + 2 decision Tasks. T9 is attached to Avery's Contact, with no Lead created. The demo inbox has 2 emails |
+| N5 | **PASS 9/9**: `send_fixtures.py --replay` resent the whole batch (including 3 emails with the same Message-ID) → all 7 were `duplicate_submission`, no new drafts, T6 still a 400, and still 5 Leads/Contacts |
+| N6 | **PASS** (two extra forms sent by hand, not part of T1–T9. They have no mock answers, so the AI took the failure path and Slack got alerts; only the matching is checked here):<br>・(a) phone only, `510.555.0177`, no email → `matched_by=leadPhone`, updated Riley's existing Lead<br>・(b) first created a "typed by hand" Lead through the API (Jamie, `(510) 555-0199`, no E.164 field), then about 5 minutes later sent a phone-only form with `510-555-0199` → `matched_by=phoneSearch`, updated the same Lead, left `Phone` unchanged, and filled in `Phone_E164__c` as `+15105550199`. Neither created a new Lead |
 
-## 9.3 E2E（真的 OpenAI，gpt-4.1-mini；使用者 2026-10-30 同意後跑）
-| ID | 結果 |
+## 9.3 E2E (real OpenAI, gpt-4.1-mini; run after the user approved it on 2026-10-30)
+| ID | Result |
 |---|---|
-| E1 | **PASS：live 第 1 輪 T1–T8 8/8、T9 PASS**（台灣時間 04:05–04:07，只跑了 1 輪）。紀錄在 `output/archive-live-round-1/`，去掉收件匣地址的副本在 `results/salesforce-live-round-1.json` |
-| E2 | **PASS**：`compare_results.py` 產生並排表，HubSpot 8/8、Salesforce 8/8（`output/results-side-by-side.md`） |
-| E3 | **PASS**：demo 收件匣剛好 2 封核准的回覆（T1 改稿版、T2 原稿）；T5、T9 被 reject，沒有寄出 |
-| E4 | **NOT RUN**：Salesforce UI 截圖由使用者拍（作品集那一步） |
+| E1 | **PASS: live round 1, T1–T8 8/8, T9 PASS** (04:05–04:07 Taiwan time; only 1 round run). Logs are in `output/archive-live-round-1/`, and a copy with the inbox address removed is in `results/salesforce-live-round-1.json` |
+| E2 | **PASS**: `compare_results.py` produced the side-by-side table, HubSpot 8/8 and Salesforce 8/8 (`output/results-side-by-side.md`) |
+| E3 | **PASS**: the demo inbox has exactly 2 approved replies (T1 edited, T2 original). T5 and T9 were rejected and nothing was sent |
+| E4 | **NOT RUN**: Salesforce UI screenshots are taken by the user (in the portfolio step) |
 
-另外直接用 API 驗了一次唯一值：對 Dana 的 Lead 再建一筆 `Inquiry_Source_ID__c = form:tw-demo-0001` 的 Task → Salesforce 回 400 `DUPLICATE_VALUE`，沒有存進去。所以「同一個 source ID 不會有第二筆 Task」是 Salesforce 擋的，不只是查詢擋的。
+I also tested the unique constraint directly through the API: creating another Task on Dana's Lead with `Inquiry_Source_ID__c = form:tw-demo-0001` → Salesforce returned 400 `DUPLICATE_VALUE` and didn't save it. So Salesforce itself blocks a second Task with the same source ID; it isn't only the lookup.
 
-並排表要照實說明：HubSpot 那欄是它的 live **第 2 輪**（第 1 輪 4/8，修了引用長度檢查後重跑）；Salesforce 這輪用的是已經修好的同一份 `llm.js`，所以第 1 輪就 8/8。
+A note on the side-by-side table: the HubSpot column is its live **round 2** (round 1 was 4/8, rerun after fixing the quote length check). This Salesforce run used the same, already fixed `llm.js`, so it scored 8/8 in round 1.
 
-### 真實 AI 的分級
-| # | AI 判斷 | 跟預期 |
+### How the real AI rated each fixture
+| # | AI rating | vs. expected |
 |---|---|---|
-| T1 | qualified（run log） | 一致 |
-| T2 | needs_review（「沒講坪數、頻率」）；Lead 依不降級規則維持 qualified | 一致（最終 tier） |
-| T4 | not_qualified／sales_pitch／low | 一致 |
-| T5 | needs_review／quote_request／normal | 一致 |
-| T7 | OpenAI 真的回 404 → needs_review、告警 | 一致 |
-| T9 | qualified／deep_cleaning／normal | 一致 |
+| T1 | qualified (run log) | Match |
+| T2 | needs_review ("no square footage or frequency"); the Lead stays qualified under the no-downgrade rule | Match (final tier) |
+| T4 | not_qualified/sales_pitch/low | Match |
+| T5 | needs_review/quote_request/normal | Match |
+| T7 | OpenAI really returned 404 → needs_review, alert | Match |
+| T9 | qualified/deep_cleaning/normal | Match |
 
-### live 跑出來、要照實寫的限制
-- **草稿看不到同一人之前的詢問**（和 HubSpot 版一樣）：T2 的草稿又問 Dana 辦公室多大、多久清一次，她在 T1 已經寫了。照 fixture 設定未改稿直接 approve 寄出。
-- **`AI_Reason__c` 以最新一封為準，tier 卻保留較高的分級**（和 HubSpot 版一樣）：Dana 是 qualified，但理由寫的是 T2 的「沒講坪數、頻率」。
-- **T9 的草稿有點過度承諾**：「We can definitely add carpet cleaning … during your next monthly deep clean」，prompt 明明寫不能承諾日期。這份照 fixture 被 reject，沒有寄出；這正是人工核准要擋的東西。
-- 跑完已切回 `LLM_MODE=mock`。Salesforce 裡留著這一輪的 4 個 Lead＋Avery 的 Contact，可以拿來截圖。
+### Limits the live run exposed
+- **The draft can't see the person's earlier inquiries** (same as the HubSpot version): T2's draft asked Dana again how big the office is and how often it needs cleaning, which she'd already said in T1. Per the fixture, it was approved unedited and sent.
+- **`AI_Reason__c` follows the latest email, while tier keeps the higher rating** (same as the HubSpot version): Dana is qualified, but the reason is T2's "no square footage or frequency".
+- **T9's draft overpromises a bit**: "We can definitely add carpet cleaning … during your next monthly deep clean", even though the prompt says not to commit to dates. Per the fixture it was rejected and never sent, which is exactly what human approval is for.
+- Switched back to `LLM_MODE=mock` after the run. Salesforce still has this round's 4 Leads + Avery's Contact for screenshots.
 
-## 開發中遇到並修正的問題
-1. **Composite 不接受 SOSL**：第一次送 T1，`phoneSearch` 子請求回 404 `NOT_FOUND`。比對程式照設計丟錯、error workflow 發了 Slack 告警，沒有被當成「沒找到」。改成另一個 HTTP 節點，只有在 email 和已存電話都沒找到時才搜。
-2. **SOSL 電話格式**：`FIND {+1…}` 回 `MALFORMED_SEARCH`（`+` 被當成 bind 變數），`510-555-0188` 也會語法錯誤；只送 10 碼數字可以找到存成 `+15105550188` 的記錄。新記錄要等幾分鐘才搜得到（剛建 Avery 時搜不到，幾分鐘後就搜得到）。
-3. **demo 模式擋掉只有電話的詢問**：從 HubSpot 版沿用的規則是「沒有 `@example` email 就拒收」，所以只有電話的詢問永遠進不來（HubSpot 版的電話比對沒觸發過，原因就在這）。改成 demo 模式下也接受電話在虛構 555-0100–0199 範圍的詢問；reset 也會清掉這類記錄。
-4. **表單詢問的 Task 主旨都一樣**：表單整理後主旨固定是 `Website contact form`，Task 列表會看不出差別。表單詢問改用訊息開頭當主旨，email 詢問照樣用信件主旨。
+## Problems found and fixed during development
+1. **Composite doesn't accept SOSL.** On the first T1 send, the `phoneSearch` subrequest returned 404 `NOT_FOUND`. The matching code threw as designed and the error workflow sent a Slack alert, so it was never treated as "not found". It's now a separate HTTP node that only searches when neither the email nor the stored phone matched.
+2. **SOSL phone format.** `FIND {+1…}` returned `MALFORMED_SEARCH` (the `+` is read as a bind variable), and `510-555-0188` is also a syntax error. Sending just the 10 digits finds records stored as `+15105550188`. New records take a few minutes to become searchable (right after Avery was created the search found nothing; a few minutes later it did).
+3. **Demo mode blocked phone-only inquiries.** The rule carried over from the HubSpot version was "reject anything without an `@example` email", so phone-only inquiries could never get in (which is why the HubSpot version's phone matching never fired). Demo mode now also accepts inquiries with a phone in the fictional 555-0100–0199 range, and reset clears those records too.
+4. **Every form inquiry Task had the same subject.** After normalizing, form subjects were always `Website contact form`, so the Task list couldn't tell them apart. Form inquiries now use the start of the message as the subject; email inquiries still use the email subject.
 
-## 與 SPEC 不同的地方（已同步更新 SPEC）
-- 電話搜尋從 Composite 拆出來（SPEC §4 第 2.5 點）。
-- demo 寫入範圍加上 555-01xx 電話（SPEC §1 第 6 點）。
+## Differences from SPEC (SPEC updated to match)
+- The phone search moved out of Composite (SPEC §4, step 2.5).
+- The demo write scope now includes 555-01xx phone numbers (SPEC §1, rule 6).
 
-## 目前 Salesforce 裡的資料
-- live 第 1 輪的 5 筆 demo 記錄（Dana、Jordan、Sam、Riley 的 Lead，Avery 的 Contact）。**拍完截圖之前不要 reset 或重跑。**
-- 一開始試送 T1 時留下一個在等待審核的 n8n execution（舊版 workflow），約 2026-11-02 逾時。它對應的 Lead 已經被刪掉，逾時時寫 Task 會失敗，可能會發一則錯誤告警；不影響結果。
+## What's in Salesforce right now
+- The 5 demo records from live round 1 (Leads for Dana, Jordan, Sam, and Riley; Avery's Contact). **Don't reset or rerun until the screenshots are taken.**
+- An early T1 test left one n8n execution waiting for review (old workflow version) that times out around 2026-11-02. Its Lead has already been deleted, so writing the Task on timeout will fail and may send an error alert. It doesn't affect the results.
 
-## 待辦
-- 無（README、SETUP、OPERATIONS 已改寫成 Salesforce 版，README 過了 humanizer）。
+## To do
+- None (README, SETUP, and OPERATIONS have been rewritten for Salesforce, and the README went through humanizer).
