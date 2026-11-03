@@ -48,6 +48,25 @@ A note on the side-by-side table: the HubSpot column is its live **round 2** (ro
 - **T9's draft overpromises a bit**: "We can definitely add carpet cleaning … during your next monthly deep clean", even though the prompt says not to commit to dates. Per the fixture it was rejected and never sent, which is exactly what human approval is for.
 - Switched back to `LLM_MODE=mock` after the run. Salesforce still has this round's 4 Leads + Avery's Contact for screenshots.
 
+## Review login, intake only and sorting without drafts (2026-11-04, mock LLM, real Salesforce)
+Ported from the GoHighLevel and HubSpot versions: the review page and its form ask for one basic-auth login (`REVIEW_USER`, `REVIEW_PASSWORD`); `LLM_MODE=off` keeps only the intake (the Starter tier); `DRAFT_MODE=off` sorts without drafting replies (the Standard tier). Offline: 61 node tests (four new) and 25 Python tests pass.
+
+Three rounds against the real Developer Edition org, each after `reset_demo.py --apply`, with the form fixtures only (`send_fixtures.py --only T1,T3,T5,T6,T7`) and the mock LLM. Every draft was rejected, so no email was sent. Output kept in `output/archive-live-modes-full/`, `-starter/` and `-standard/` (`live-check.json` in each).
+
+| Check | Default (`LLM_MODE=mock`) | `LLM_MODE=off` | `DRAFT_MODE=off` |
+|---|---|---|---|
+| T1, T5, T7 | New Leads; Qualified, Needs review, Needs review | New Leads; no tier | New Leads; Qualified, Needs review, Needs review |
+| T3 | Repeat | Repeat | Repeat |
+| T6 | 400 + alert | 400 + alert | 400 + alert |
+| Lead Tier and AI Reason on the 3 Leads | Filled | Empty | Filled |
+| Inquiry Tasks with the AI line | 3 of 3 | 0 of 3 | 3 of 3 |
+| Drafts and review pages | 2 (T1, T5), both rejected, each with a decision Task | 0 | 0 |
+| Slack alerts | T6, T7 | T6 only | T6, T7 |
+
+In the default round the review login was checked on both review pages: the page answered 401 without the login and 200 with it, the form post 401 without it, 422 with it but no reviewer name, and 200 for the reject. Avery's seed Contact was left untouched in all three rounds.
+
+Not covered: approving and sending with the login on Salesforce (checked on the HubSpot version), the email sources (T2, T4), phone matching, and a live OpenAI run in either mode.
+
 ## Problems found and fixed during development
 1. **Composite doesn't accept SOSL.** On the first T1 send, the `phoneSearch` subrequest returned 404 `NOT_FOUND`. The matching code threw as designed and the error workflow sent a Slack alert, so it was never treated as "not found". It's now a separate HTTP node that only searches when neither the email nor the stored phone matched.
 2. **SOSL phone format.** `FIND {+1…}` returned `MALFORMED_SEARCH` (the `+` is read as a bind variable), and `510-555-0188` is also a syntax error. Sending just the 10 digits finds records stored as `+15105550188`. New records take a few minutes to become searchable (right after Avery was created the search found nothing; a few minutes later it did).
@@ -59,8 +78,7 @@ A note on the side-by-side table: the HubSpot column is its live **round 2** (ro
 - The demo write scope now includes 555-01xx phone numbers (SPEC §1, rule 6).
 
 ## What's in Salesforce right now
-- The 5 demo records from live round 1 (Leads for Dana, Jordan, Sam, and Riley; Avery's Contact). **Don't reset or rerun until the screenshots are taken.**
-- An early T1 test left one n8n execution waiting for review (old workflow version) that times out around 2026-11-02. Its Lead has already been deleted, so writing the Task on timeout will fail and may send an error alert. It doesn't affect the results.
+- The 3 demo Leads from the last `DRAFT_MODE=off` round (Dana, Sam, Riley) and Avery's seed Contact.
 
 ## To do
 - None (README, SETUP, and OPERATIONS have been rewritten for Salesforce, and the README went through humanizer).

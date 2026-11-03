@@ -48,7 +48,8 @@ def run(command, values):
 def import_credentials(values):
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
         local_path = Path(handle.name)
-        json.dump(credentials(values), handle)
+        creds = credentials(values)
+        json.dump(creds, handle)
     container_path = "/tmp/lead-intake-credentials.json"
     try:
         run(["docker", "compose", "cp", str(local_path), f"n8n:{container_path}"], values)
@@ -56,6 +57,7 @@ def import_credentials(values):
     finally:
         local_path.unlink(missing_ok=True)
         subprocess.run(["docker", "compose", "exec", "-T", "-u", "root", "n8n", "rm", "-f", container_path], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return len(creds)
 
 
 def main():
@@ -65,8 +67,7 @@ def main():
     args = parser.parse_args()
     values = load_env()
     if not args.skip_credentials:
-        import_credentials(values)
-        print("Imported 4 credentials.")
+        print(f"Imported {import_credentials(values)} credentials.")
     run(["docker", "compose", "exec", "-T", "n8n", "n8n", "import:workflow", "--separate", "--input=/files/workflows/"], values)
     print(f"Imported {len(WORKFLOW_IDS)} workflows.")
     if args.no_publish:
