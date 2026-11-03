@@ -17,7 +17,7 @@
         -60
       ],
       "parameters": {
-        "content": "## Review page\n`GET /webhook/review?id=…` serves the saved review page so the Slack link opens in the browser.",
+        "content": "## Review page\n`GET /webhook/review?id=…` serves the saved review page so the Slack link opens in the browser. Both this page and the form it posts to need the review login (basic auth).",
         "width": 700,
         "height": 140,
         "color": 7
@@ -37,7 +37,14 @@
         "httpMethod": "GET",
         "path": "review",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {},
+        "authentication": "basicAuth"
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "reviewLoginCred01",
+          "name": "Review page login"
+        }
       }
     },
     {

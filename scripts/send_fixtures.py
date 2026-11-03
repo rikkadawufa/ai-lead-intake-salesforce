@@ -6,6 +6,7 @@
   python scripts/send_fixtures.py --replay           # send the same batch again (idempotency check)
 """
 import argparse
+import base64
 import json
 import smtplib
 import ssl
@@ -18,10 +19,10 @@ from email.message import EmailMessage
 from email.utils import formataddr
 
 try:
-    from .demo_common import FORM_URL, OUTPUT, REVIEW_DIR, base_fixture, load_fixtures, safe_id, source_id
+    from .demo_common import FORM_URL, N8N_URL, OUTPUT, REVIEW_DIR, base_fixture, load_fixtures, safe_id, source_id
     from .envfile import load_env, mask, require
 except ImportError:
-    from demo_common import FORM_URL, OUTPUT, REVIEW_DIR, base_fixture, load_fixtures, safe_id, source_id
+    from demo_common import FORM_URL, N8N_URL, OUTPUT, REVIEW_DIR, base_fixture, load_fixtures, safe_id, source_id
     from envfile import load_env, mask, require
 
 
@@ -36,6 +37,24 @@ def http_post(url, data, headers):
             return response.status, response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode("utf-8", "replace")
+
+
+
+def http_get(url, headers):
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def review_login(values):
+    pair = f"{require(values, 'REVIEW_USER')}:{require(values, 'REVIEW_PASSWORD')}"
+    return "Basic " + base64.b64encode(pair.encode("utf-8")).decode("ascii")
+
+
+def review_page_url(meta_path):
+    return f"{N8N_URL}/webhook/review?id={urllib.parse.quote(meta_path.stem)}"
 
 
 def form_request(fixture, fixtures):
@@ -108,9 +127,14 @@ def submit_reviews(values, fixtures, reviews):
             log["results"].append({"fixture": review["fixture"], "error": "no_review_page"})
             continue
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        headers = {"Content-Type": "application/x-www-form-urlencoded", "Authorization": review_login(values)}
         entry = {"fixture": review["fixture"], "decision": review["decision"]}
         if index == 0:
+            # Show that the review page and its form refuse anyone without the review login.
+            entry["page_without_login_status"] = http_get(review_page_url(meta_path), {})
+            entry["page_with_login_status"] = http_get(review_page_url(meta_path), {"Authorization": headers["Authorization"]})
+            fields = urllib.parse.urlencode({"reviewer": review["reviewer"], "decision": review["decision"]}).encode()
+            entry["post_without_login_status"], _ = http_post(meta["resume_url"], fields, {"Content-Type": headers["Content-Type"]})
             # Show that an incomplete review is refused and nothing is sent.
             status, _ = http_post(meta["resume_url"], urllib.parse.urlencode({"decision": review["decision"]}).encode(), headers)
             entry["incomplete_review_status"] = status
@@ -120,7 +144,7 @@ def submit_reviews(values, fixtures, reviews):
             fields["body"] = review["edit_body"]
         status, text = http_post(meta["resume_url"], urllib.parse.urlencode(fields).encode(), headers)
         entry.update({"http_status": status, "response": text[:200]})
-        print(f"[{review['fixture']}] {review['decision']} -> {status}" + (f" (incomplete first try -> {entry['incomplete_review_status']})" if "incomplete_review_status" in entry else ""))
+        print(f"[{review['fixture']}] {review['decision']} -> {status}" + (f" (no login: page {entry['page_without_login_status']}, form {entry['post_without_login_status']}; incomplete first try -> {entry['incomplete_review_status']})" if "incomplete_review_status" in entry else ""))
         log["results"].append(entry)
         time.sleep(3)
     log["run_finished"] = now()

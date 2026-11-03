@@ -118,3 +118,17 @@ test('a duplicate rule block names the existing record', () => {
 test('record links open the Lightning record page', () => {
   assert.equal(recordUrl('https://demo-dev-ed.develop.my.salesforce.com/', 'Lead', '00QA'), 'https://demo-dev-ed.develop.my.salesforce.com/lightning/r/Lead/00QA/view');
 });
+
+test('without AI sorting only the source is written and the inquiry Task has no AI line', () => {
+  const { inquiryTask } = require('./records');
+  const intakeOnly = { tier: null, topic: null, urgency: null, reason: null, llm_ok: false, llm_error: null, ai: false };
+  const created = buildRecordFields(inquiry, intakeOnly).fields;
+  assert.equal(created.Inquiry_Source__c, 'email');
+  for (const field of ['Lead_Tier__c', 'Inquiry_Topic__c', 'Inquiry_Urgency__c', 'AI_Reason__c']) assert.ok(!(field in created), field);
+  // A record that was Qualified before keeps its AI fields untouched.
+  const updated = buildRecordFields(inquiry, intakeOnly, { type: 'Lead', id: '00QA', fields: { Lead_Tier__c: 'qualified', Email: 'dana@example.com', Phone: '+15105550142', Phone_E164__c: '+15105550142', FirstName: 'Dana' } }).fields;
+  assert.deepEqual(updated, { Inquiry_Source__c: 'email' });
+  const description = inquiryTask('00QA', { ...inquiry, received_at: '2026-11-04T00:00:00Z', message: 'Is Tuesday possible?' }, intakeOnly).Description;
+  assert.doesNotMatch(description, /AI/);
+  assert.match(description, /Is Tuesday possible\?$/);
+});

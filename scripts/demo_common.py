@@ -12,7 +12,8 @@ FIXTURES_PATH = ROOT / "sample-data" / "fixtures.json"
 OUTPUT = ROOT / "output"
 RUN_LOG_DIR = OUTPUT / "run-log"
 REVIEW_DIR = OUTPUT / "review"
-FORM_URL = "http://localhost:5680/webhook/inquiry"
+N8N_URL = "http://localhost:5680"
+FORM_URL = f"{N8N_URL}/webhook/inquiry"
 
 
 def load_fixtures(path=FIXTURES_PATH):

@@ -32,6 +32,9 @@ def credentials(values):
          "data": {"user": gmail, "password": gmail_password, "host": "imap.gmail.com", "port": 993, "secure": True, "allowUnauthorizedCerts": False}},
         {"id": "gmailSmtpCred01", "name": "Gmail SMTP (demo inbox)", "type": "smtp",
          "data": {"user": gmail, "password": gmail_password, "host": "smtp.gmail.com", "port": 465, "secure": True, "disableStartTls": False, "hostName": ""}},
+        # The review page and its form post are public webhooks once n8n is reachable, so both ask for this login.
+        {"id": "reviewLoginCred01", "name": "Review page login", "type": "httpBasicAuth",
+         "data": {"user": require(values, "REVIEW_USER"), "password": require(values, "REVIEW_PASSWORD")}},
     ]
 
 

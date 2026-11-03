@@ -9,6 +9,7 @@ function oneLine(text, limit) {
 
 function inquiryDescription(inquiry, qualification) {
   const header = [`[${inquiry.source}] ${inquiry.received_at}`, ...(inquiry.subject ? [inquiry.subject] : [])];
+  if (qualification.ai === false) return [...header, '', inquiry.message].join('\n');
   const ai = `AI: ${qualification.tier} / ${qualification.topic} / ${qualification.urgency} — ${qualification.reason}`;
   return [...header, '', inquiry.message, '', ai].join('\n');
 }

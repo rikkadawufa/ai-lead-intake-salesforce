@@ -87,6 +87,8 @@ function splitName(name) {
 }
 
 function aiFields(inquiry, qualification, currentTier) {
+  // Without AI sorting (qualification.ai === false) only the source is written; the AI fields stay as they are.
+  if (qualification.ai === false) return { Inquiry_Source__c: inquiry.source };
   return {
     Lead_Tier__c: mergeTier(currentTier, qualification.tier),
     Inquiry_Topic__c: qualification.topic,

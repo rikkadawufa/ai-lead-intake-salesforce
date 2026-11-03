@@ -41,6 +41,14 @@ The reply style lives in [../prompts/draft-reply.md](../prompts/draft-reply.md) 
 
 Test a rule change in mock mode first, then do one live run (see SETUP §6). In mock mode the AI answers come from `sample-data/mock-llm/`, so mock runs only test the plumbing, not the new wording.
 
+## Running without AI
+
+`LLM_MODE=off` keeps only the intake: each inquiry is still matched by email, then phone, repeats are still stopped, empty name, email and phone fields are still filled, and the message is still saved on the record. Nothing goes to OpenAI. Only Inquiry Source is written; Lead Tier, Topic, Urgency and AI Reason are left as they are, the inquiry Task has no AI line, and no draft or AI alert is made. An OpenAI key isn't used in this mode. Recreate the container after changing it (`docker compose up -d --force-recreate n8n`).
+
+## Sorting without reply drafts
+
+`DRAFT_MODE=off` keeps the AI sorting and stops before the reply step: the AI fields, the inquiry Task's AI line and the AI failure alert all work as usual, but no draft is written, no review page is made and Slack gets no review link, only the alerts. Leave `LLM_MODE` on `live` (or `mock`); with `LLM_MODE=off` there is nothing to draft anyway. Recreate the container after changing it (`docker compose up -d --force-recreate n8n`).
+
 ## Adding a topic or tier value
 
 Values have to match in three places:
@@ -109,4 +117,4 @@ Keep `N8N_ENCRYPTION_KEY` unchanged through all of this.
 
 ## Leaving demo mode
 
-`DEMO_MODE=1` blocks every sender outside `example.com` / `example.org` (and phone-only inquiries outside the fictional 555-01xx range) and sends approved replies to `REPLY_REDIRECT_TO`. Before setting `DEMO_MODE=0` for real use, put n8n on a host the team can reach, add access control in front of the review page, give the Run As user only the permissions it needs, and run one live test with an address you own.
+`DEMO_MODE=1` blocks every sender outside `example.com` / `example.org` (and phone-only inquiries outside the fictional 555-01xx range) and sends approved replies to `REPLY_REDIRECT_TO`. Before setting `DEMO_MODE=0` for real use, put n8n on a host the team can reach over HTTPS, set a strong `REVIEW_PASSWORD` (the review page and its form already ask for it), give the Run As user only the permissions it needs, and run one live test with an address you own.

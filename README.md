@@ -89,7 +89,7 @@ Runs on a free Salesforce Developer Edition org, a Gmail test inbox and Slack, w
 - Drafts can promise more than they should. In the live run, the T9 draft said "We can definitely add carpet cleaning … during your next monthly deep clean", although the prompt says not to commit to dates. The reviewer rejected it, which is what the approval step is for, but the prompt alone doesn't stop it.
 - `AI_Reason__c` describes the latest message, while `Lead_Tier__c` keeps the highest tier. After T2, Dana is Qualified, but the reason field explains why the follow-up on its own looked like Needs review.
 - The phone search only finds records a few minutes after they're created. A record typed in seconds before a phone-only inquiry arrives won't be found that way.
-- The review page is served by n8n on localhost, and the reviewer types their name; there's no sign-in. A team setup would need n8n on a reachable host with access control in front of it.
+- The review page is served by n8n on localhost. The page and its form ask for one shared basic-auth login, and the reviewer types their name, so the name isn't tied to an account. A team setup would need n8n on a reachable host over HTTPS.
 - Tested on a Salesforce Developer Edition org only. Not tested with a production or sandbox org, Person Accounts, Web-to-Lead, assignment rules, or other CRMs.
 
 ## Not included
@@ -100,7 +100,7 @@ WhatsApp or social media intake, an auto-reply chatbot, follow-up sequences, opp
 
 This repo runs a demo for a made-up company on localhost. Putting it to work for a real team takes more:
 
-- Hosting n8n somewhere reachable, with sign-in in front of the review page
+- Hosting n8n somewhere reachable over HTTPS, so the review login isn't sent in the clear
 - Setting up the fields, the integration user and its permissions in your Salesforce org, plus keys and an alert channel
 - Fitting it to how your org already works: page layouts, duplicate rules, lead assignment and conversion
 - Rewriting the sorting rules and the reply tone for your business

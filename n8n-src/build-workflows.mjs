@@ -14,6 +14,8 @@ const CREDS = {
   openai: { httpHeaderAuth: { id: 'openAiCred01', name: 'OpenAI' } },
   imap: { imap: { id: 'gmailImapCred01', name: 'Gmail IMAP (demo inbox)' } },
   smtp: { smtp: { id: 'gmailSmtpCred01', name: 'Gmail SMTP (demo inbox)' } },
+  // One login for both review URLs: the page (GET /webhook/review) and the form post (the Wait node's resume URL).
+  review: { httpBasicAuth: { id: 'reviewLoginCred01', name: 'Review page login' } },
 };
 
 const id = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -189,6 +191,7 @@ function processInquiry() {
 
 const fs = require('fs');
 const ctx = $input.first().json;
+if ($env.LLM_MODE === 'off') return [{ json: {} }];
 const id = fixtureIdFor(ctx.inquiry.source_id, ${loadFixtures});
 const file = '/files/sample-data/mock-llm/' + id + '.${kind}.json';
 const content = id && fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
@@ -234,7 +237,7 @@ return [{ json: { ...ctx, request: buildQualifyRequest(ctx.inquiry, PROMPT) } }]
     at(code('Apply qualification', `${source('llm', 'match')}
 
 const ctx = $('Build qualify request').first().json;
-const qualification = qualificationFromLlm($input.first().json, ctx.inquiry.message);
+const qualification = $env.LLM_MODE === 'off' ? intakeOnlyQualification() : qualificationFromLlm($input.first().json, ctx.inquiry.message);
 const target = buildRecordFields(ctx.inquiry, qualification, ctx.record);
 return [{ json: { inquiry: ctx.inquiry, record: ctx.record, matchedBy: ctx.matchedBy, qualification, target, recordType: target.type, recordId: target.id || null } }];`), 2420, 200),
 
@@ -267,12 +270,12 @@ const ctx = wasCreated ? created : ($('Rebuild fields').isExecuted ? $('Rebuild 
 return [{ json: { ...ctx, action: wasCreated ? 'created' : 'updated', task: inquiryTask(ctx.recordId, ctx.inquiry, ctx.qualification) } }];`), 4820, 200),
     at(salesforce('Create inquiry task', 'POST', "'/sobjects/Task'", '$json.task'), 5040, 200),
     at(code('Restore context', "return [{ json: $('Prepare inquiry task').first().json }];"), 5260, 200),
-    at(ifNode('Draft a reply?', "={{ $json.qualification.llm_ok && $json.qualification.tier !== 'not_qualified' }}", isTrue), 5480, 200),
+    at(ifNode('Draft a reply?', "={{ $env.DRAFT_MODE !== 'off' && $json.qualification.llm_ok && $json.qualification.tier !== 'not_qualified' }}", isTrue), 5480, 200),
     at(code('Log without draft', `${source('records', 'match')}
 
 const ctx = $input.first().json;
 const link = recordUrl($env.SF_INSTANCE_URL, ctx.recordType, ctx.recordId);
-const alerts = ctx.qualification.llm_ok ? [] : [llmFailureAlert(ctx.inquiry, ctx.qualification, link)];
+const alerts = ctx.qualification.llm_ok || ctx.qualification.ai === false ? [] : [llmFailureAlert(ctx.inquiry, ctx.qualification, link)];
 return ${runLogShape(`{ inquiry: ctx.inquiry, ${recordLog}, action: ctx.action, qualification: ctx.qualification, draft: 'none', alerts }`)};`), 5700, 420),
 
     at(code('Build draft request', `${source('llm')}
@@ -307,7 +310,7 @@ fs.writeFileSync('/files/output/review/' + reviewId + '.json', JSON.stringify({ 
 const reviewUrl = ($env.WEBHOOK_URL || 'http://localhost:5680/') + 'webhook/review?id=' + encodeURIComponent(reviewId);
 return [{ json: { ...ctx, reviewId, reviewUrl, slackText: reviewAlert(ctx.inquiry, ctx.qualification, reviewUrl) } }];`), 6800, 0),
     at(slack('Notify reviewer', '$json.slackText'), 7020, 0),
-    at({ id: 'wait-for-review', name: 'Wait for review', type: 'n8n-nodes-base.wait', typeVersion: 1.1, position: [0, 0], webhookId: stableUuid('wait-for-review'), parameters: { resume: 'webhook', httpMethod: 'POST', responseMode: 'responseNode', limitWaitTime: true, limitType: 'afterTimeInterval', resumeAmount: 72, resumeUnit: 'hours', options: {} } }, 6580, 0),
+    at({ id: 'wait-for-review', name: 'Wait for review', type: 'n8n-nodes-base.wait', typeVersion: 1.1, position: [0, 0], webhookId: stableUuid('wait-for-review'), credentials: CREDS.review, parameters: { resume: 'webhook', incomingAuthentication: 'basicAuth', httpMethod: 'POST', responseMode: 'responseNode', limitWaitTime: true, limitType: 'afterTimeInterval', resumeAmount: 72, resumeUnit: 'hours', options: {} } }, 6580, 0),
     at(code('Read decision', `${source('review')}
 
 const ctx = $('Build review page').first().json;
@@ -398,9 +401,10 @@ return [{ json: { task: decisionTask(ctx.recordId, r, { date, sentTo }), runLog 
 }
 
 function reviewPageServer() {
+  const open = webhook('Open review page', 'review', 'GET');
   const nodes = [
-    note('About', '## Review page\n`GET /webhook/review?id=…` serves the saved review page so the Slack link opens in the browser.', -80, -60, 700, 140, 7),
-    at(webhook('Open review page', 'review', 'GET'), 0, 200),
+    note('About', '## Review page\n`GET /webhook/review?id=…` serves the saved review page so the Slack link opens in the browser. Both this page and the form it posts to need the review login (basic auth).', -80, -60, 700, 140, 7),
+    at({ ...open, credentials: CREDS.review, parameters: { ...open.parameters, authentication: 'basicAuth' } }, 0, 200),
     at(code('Load review page', `const fs = require('fs');
 const id = String(($input.first().json.query || {}).id || '');
 const file = '/files/output/review/' + id + '.html';

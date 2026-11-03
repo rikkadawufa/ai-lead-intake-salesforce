@@ -99,6 +99,11 @@ function fallbackQualification(errorClass) {
   };
 }
 
+// LLM_MODE=off (intake only): no sorting at all. Nothing AI-related is written and no AI alert is raised.
+function intakeOnlyQualification() {
+  return { tier: null, topic: null, urgency: null, reason: null, llm_ok: false, llm_error: null, ai: false };
+}
+
 function draftFromLlm(response) {
   const parsed = readLlmJson(response);
   if (parsed.error) return { ok: false, error: parsed.error };
@@ -124,4 +129,4 @@ function mockResponse(fileContent, breakLlm) {
   return { choices: [{ message: { content: fileContent } }] };
 }
 
-if (typeof module !== 'undefined') module.exports = { TIERS, TOPICS, URGENCIES, BROKEN_MODEL, buildQualifyRequest, buildDraftRequest, readLlmJson, validateQualification, shortenQuote, qualificationFromLlm, fallbackQualification, draftFromLlm, fixtureIdFor, mockResponse, fillTemplate };
+if (typeof module !== 'undefined') module.exports = { TIERS, TOPICS, URGENCIES, BROKEN_MODEL, buildQualifyRequest, buildDraftRequest, readLlmJson, validateQualification, shortenQuote, qualificationFromLlm, fallbackQualification, intakeOnlyQualification, draftFromLlm, fixtureIdFor, mockResponse, fillTemplate };
